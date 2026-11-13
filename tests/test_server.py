@@ -75,7 +75,7 @@ def test_get_messages_end_to_end_with_fake(use):
     assert [m["id"] for m in data["messages"]] == ["spaces/A/messages/m2", "spaces/A/messages/m3"]
     assert data["next_since"] == A_MSGS[-1]
     assert data["next_since"].endswith("Z")
-    assert data["has_more"] is True
+    assert data["has_older"] is True
 
 
 def test_domain_error_reaches_claude_as_tool_error(use):

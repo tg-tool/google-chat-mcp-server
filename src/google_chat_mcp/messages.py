@@ -2,12 +2,16 @@
 
 For record-keeping, read with `since` and keep the returned `next_since`: it is the
 API's own `createTime` of the last message returned (microseconds, never rounded),
-so passing it back as `since` continues with no duplicates and no gaps — even when
-several messages share the same second. Nothing is ever cut silently: `has_more`
-says whether more messages exist beyond what was returned.
+so passing it back as `since` continues with no duplicates and no gaps. Messages that
+share one `createTime` are never split across two reads. Nothing is cut silently:
+with `since`, `has_more` says newer messages remain (continue with `next_since`);
+without `since`, `has_older` says older ones remain (page back with `older_until`
+as `until`).
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
 
 from .api import build_filter, iter_messages
 from .errors import ChatMcpError
@@ -63,6 +67,17 @@ def format_message(raw: dict) -> dict:
     return out
 
 
+def _take(stream: Iterable[dict], limit: int) -> tuple[list[dict], bool]:
+    """Up to `limit` messages plus any that share the last one's createTime, and whether
+    more remain. Never splitting a timestamp keeps `>`/`<` continuation lossless."""
+    picked: list[dict] = []
+    for raw in stream:
+        if len(picked) >= limit and raw["createTime"] != picked[-1]["createTime"]:
+            return picked, True
+        picked.append(raw)
+    return picked, False
+
+
 def read_messages(
     chat,
     space: SpaceInfo,
@@ -73,15 +88,19 @@ def read_messages(
     thread: str | None = None,
     include_bots: bool = True,
 ) -> dict:
-    """Without `since`: the newest `limit` messages (oldest first). With `since`: the first
-    `limit` messages strictly after it. Both stop before `until` when given."""
+    """Without `since`: the newest `limit` messages (oldest first; `has_older` and
+    `older_until` page backwards). With `since`: the first `limit` messages strictly after
+    it (`has_more` and `next_since` continue forwards). Both stop before `until`."""
     if limit < 1:
         raise ChatMcpError("limit は 1 以上を指定してください。")
     notes = []
     if limit > MAX_LIMIT:
-        notes.append(
-            f"limit を上限の {MAX_LIMIT} 件に丸めました。続きは next_since を since に渡して読んでください。"
+        how = (
+            "続きは next_since を since に渡して読んでください。"
+            if since
+            else "さらに古い分は older_until を until に渡して読んでください。"
         )
+        notes.append(f"limit を上限の {MAX_LIMIT} 件に丸めました。{how}")
         limit = MAX_LIMIT
     since_n = to_rfc3339(since) if since else None
     until_n = to_rfc3339(until) if until else None
@@ -94,24 +113,19 @@ def read_messages(
         order_by="createTime asc" if since_n else "createTime desc",
         page_size=min(limit + 1, _API_PAGE_MAX),
     )
-    picked: list[dict] = []
-    for raw in stream:
-        if not include_bots and raw.get("sender", {}).get("type") == "BOT":
-            continue
-        picked.append(raw)
-        if len(picked) > limit:
-            break
-    has_more = len(picked) > limit
-    picked = picked[:limit]
-    if not since_n:
+    wanted = (raw for raw in stream if include_bots or raw.get("sender", {}).get("type") != "BOT")
+    picked, more = _take(wanted, limit)
+    result = {"space": space.to_dict()}
+    if since_n:
+        result |= {"has_more": more, "next_since": picked[-1]["createTime"] if picked else since_n}
+    else:
         picked.reverse()
-    result = {
-        "space": space.to_dict(),
-        "messages": [format_message(raw) for raw in picked],
-        "count": len(picked),
-        "has_more": has_more,
-        "next_since": picked[-1]["createTime"] if picked else since_n,
-    }
+        result |= {
+            "has_older": more,
+            "older_until": picked[0]["createTime"] if picked else None,
+            "next_since": picked[-1]["createTime"] if picked else None,
+        }
+    result |= {"messages": [format_message(raw) for raw in picked], "count": len(picked)}
     if notes:
         result["notes"] = notes
     return result

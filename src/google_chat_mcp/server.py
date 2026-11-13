@@ -140,21 +140,25 @@ def get_messages(
 ) -> dict:
     """1つのスペースのメッセージを読む。読み取り専用で、既読にもしない。
 
-    - since なし: 最新の limit 件を、古い順に並べて返す。
-    - since あり: since より後のメッセージを、古い順に最大 limit 件返す。
-    - 記録をとるときは、返り値の next_since を記録に残し、次回はそれをそのまま since に渡す。
+    since を渡すかどうかで、返り値と続きの読み方が変わる。
+    - since あり（記録の続き）: since より後のメッセージを、古い順に最大 limit 件返す。
+      has_more が true なら、まだ新しい分がある → 返り値の next_since をそのまま since に渡して続きを読む。
+    - since なし（最新を見る）: 最新の limit 件を、古い順に並べて返す。
+      has_older が true なら、それより古い分がある → 返り値の older_until をそのまま until に渡して読む
+      （next_since を since に渡しても古い分は読めない）。
+    - 記録をとるときは、最後の呼び出しの next_since を記録に残し、次回はそれをそのまま since に渡す。
       next_since は小数秒まで正確な値なので、加工せずに渡せば重複も取りこぼしも無く続きから読める。
-    - has_more が true なら、まだ続きがある（next_since を since に渡して続きを読む）。
+    - 同じ時刻のメッセージは途中で分けないため、limit を少し超えて返ることがある。
     - 各メッセージ: id・time（日本時間）・sender（名前）・sender_type（HUMAN / BOT）・text・thread。
       該当するときだけ is_reply（返信）・edited（編集済み）・attachments（Drive のファイルは drive_file_id）。
 
     Args:
         space: スペースの名前（一部でよい）・URL・ID（spaces/…）のどれか。DM は相手の名前で指定できる。
         since: この時刻より後だけ（例 "2026-11-01"、"2026-11-01T09:00"、または前回の next_since）。
-        until: この時刻より前だけ。
+        until: この時刻より前だけ（古い分を読むときは older_until を渡す）。
         limit: 最大件数（既定 100、上限 500）。
         thread: このスレッドだけを読む（メッセージの thread の値）。
-        include_bots: False ならボット・アプリの発言を除く。
+        include_bots: 既定 true（ボット・アプリの発言も含める）。false にすると除く。記録では既定のままにする。
     """
 
     def run() -> dict:
@@ -245,7 +249,7 @@ def get_unread(space: str | None = None, limit: int = 200, include_bots: bool = 
     Args:
         space: スペースの名前・URL・ID。省略時は全スペース。
         limit: 返すメッセージの合計の最大件数（既定 200）。
-        include_bots: False ならボット・アプリの発言を除く。
+        include_bots: 既定 true（ボット・アプリの発言も含める）。false にすると除く。
     """
 
     def run() -> dict:

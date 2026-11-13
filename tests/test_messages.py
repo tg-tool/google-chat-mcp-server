@@ -106,7 +106,9 @@ def test_latest_mode_returns_newest_in_ascending_order():
     result = read_messages(chat, SP, limit=3)
     assert ids(result) == ["m3", "m4", "m5"]
     assert result["count"] == 3
-    assert result["has_more"] is True
+    assert result["has_older"] is True
+    assert result["older_until"] == ts(3)
+    assert "has_more" not in result
     assert result["next_since"] == ts(5)
     assert result["space"]["display_name"] == "営業定例"
     assert "notes" not in result
@@ -136,13 +138,47 @@ def test_continuation_within_same_second():
     assert second["has_more"] is False
 
 
-def test_limit_is_capped_with_note():
+def test_latest_limit_is_capped_and_older_pages_lose_nothing():
     chat = chat_with([message("A", i, ts(i)) for i in range(600)])
-    result = read_messages(chat, SP, limit=1000)
+    first = read_messages(chat, SP, limit=1000)
+    assert first["count"] == 500
+    assert ids(first)[0] == "m100"
+    assert first["has_older"] is True
+    assert any("500" in note and "older_until" in note for note in first["notes"])
+    older = read_messages(chat, SP, until=first["older_until"], limit=1000)
+    assert ids(older) == [f"m{i}" for i in range(100)]
+    assert older["has_older"] is False
+    assert sorted(ids(first) + ids(older), key=lambda s: int(s[1:])) == [
+        f"m{i}" for i in range(600)
+    ]
+
+
+def test_since_limit_note_points_to_next_since():
+    chat = chat_with([message("A", i, ts(i)) for i in range(600)])
+    result = read_messages(chat, SP, since="2026-11-13T00:00:00Z", limit=1000)
     assert result["count"] == 500
-    assert ids(result)[0] == "m100"
     assert result["has_more"] is True
-    assert any("500" in note for note in result["notes"])
+    assert any("500" in note and "next_since" in note for note in result["notes"])
+
+
+def test_identical_timestamps_are_never_split():
+    t1, t2, t3 = (
+        "2026-11-13T12:00:00.000001Z",
+        "2026-11-13T12:00:00.000002Z",
+        "2026-11-13T12:00:00.000003Z",
+    )
+    msgs = [message("A", 1, t1), message("A", 2, t2), message("A", 3, t2), message("A", 4, t3)]
+    chat = chat_with(msgs)
+    first = read_messages(chat, SP, since="2026-11-13T00:00:00Z", limit=2)
+    assert ids(first) == ["m1", "m2", "m3"]
+    assert first["has_more"] is True
+    assert first["next_since"] == t2
+    assert ids(read_messages(chat, SP, since=first["next_since"], limit=2)) == ["m4"]
+    latest = read_messages(chat, SP, limit=2)
+    assert sorted(ids(latest)) == ["m2", "m3", "m4"]
+    assert latest["has_older"] is True
+    assert latest["older_until"] == t2
+    assert ids(read_messages(chat, SP, until=latest["older_until"], limit=2)) == ["m1"]
 
 
 def test_invalid_limit_raises():
@@ -159,10 +195,10 @@ def test_include_bots_false_skips_bots():
     ]
     with_bots = read_messages(chat_with(msgs), SP, limit=2)
     assert ids(with_bots) == ["m2", "m3"]
-    assert with_bots["has_more"] is True
+    assert with_bots["has_older"] is True
     people_only = read_messages(chat_with(msgs), SP, limit=2, include_bots=False)
     assert ids(people_only) == ["m1", "m3"]
-    assert people_only["has_more"] is False
+    assert people_only["has_older"] is False
 
 
 def test_thread_filter_reads_one_thread():
@@ -190,4 +226,7 @@ def test_nothing_new():
     assert caught_up["has_more"] is False
     assert caught_up["next_since"] == ts(5)
     assert read_messages(chat, SP, since="2026-11-14")["next_since"] == "2026-11-14T00:00:00+09:00"
-    assert read_messages(chat_with([]), SP)["next_since"] is None
+    empty = read_messages(chat_with([]), SP)
+    assert empty["next_since"] is None
+    assert empty["older_until"] is None
+    assert empty["has_older"] is False
