@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+*.egg-info/
+dist/
+build/
+# 認証情報は絶対にコミットしない
+credentials.json
+token.json
+client_secret*.json
+*.key
+.idea/
+.vscode/
+.DS_Store
+.pytest_cache/
+.ruff_cache/
