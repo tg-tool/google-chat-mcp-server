@@ -196,3 +196,14 @@ def test_me_falls_back_when_a_read_state_fails():
     chat = make_chat()
     chat.read_state_errors = {"spaces/AAAAbbb123"}
     assert SpaceDirectory(chat).me() == ME
+
+
+def test_parse_space_ref_accepts_urls_without_scheme():
+    assert parse_space_ref("chat.google.com/room/AAAAbbb123?cls=7") == "spaces/AAAAbbb123"
+    assert parse_space_ref("mail.google.com/chat/u/0/#chat/dm/DDDDeee456") == "spaces/DDDDeee456"
+
+
+def test_resolve_ignores_spaces_inside_names():
+    d = SpaceDirectory(make_chat())
+    assert d.resolve("山田太郎").space == "spaces/DDDDeee456"
+    assert d.resolve("営業 定例").space == "spaces/AAAAbbb123"

@@ -83,9 +83,14 @@ def parse_space_ref(ref: str) -> str | None:
     ref = ref.strip()
     if _REF_RE.match(ref):
         return ref
-    if ref.startswith(("http://", "https://")) and (m := _URL_RE.search(ref)):
+    if "google.com/" in ref and (m := _URL_RE.search(ref)):
         return f"spaces/{m.group(1)}"
     return None
+
+
+def _squash(s: str) -> str:
+    """Normalized and without any whitespace, so "山田太郎" matches "山田 太郎"."""
+    return re.sub(r"\s+", "", norm(s))
 
 
 def _bare(display_name: str) -> str:
@@ -226,13 +231,15 @@ class SpaceDirectory:
                     "list_spaces で一覧を確認してください。"
                 ) from exc
         infos = self.all()
-        key = norm(ref.strip())
+        key = _squash(ref)
         if not key:
             raise ChatMcpError(
                 "スペースが指定されていません。名前・URL・ID のどれかを指定してください（一覧は list_spaces）。"
             )
-        exact = [i for i in infos if key in (norm(i.display_name), norm(_bare(i.display_name)))]
-        partial = [i for i in infos if key in norm(i.display_name)]
+        exact = [
+            i for i in infos if key in (_squash(i.display_name), _squash(_bare(i.display_name)))
+        ]
+        partial = [i for i in infos if key in _squash(i.display_name)]
         found = _one(ref, exact) or _one(ref, partial)
         if found:
             return found
