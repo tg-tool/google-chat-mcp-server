@@ -12,7 +12,9 @@ from fakes import FakeChat
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "google_chat_mcp"
 ALLOWED = {"spaces", "messages", "members", "users", "list", "get", "getSpaceReadState", "execute"}
-WRITE_CALL = re.compile(r"\b(create|patch|delete|updateSpaceReadState|upload)\s*\(")
+WRITE_CALL = re.compile(
+    r"\b(create|patch|delete|update|updateSpaceReadState|upload|setup|completeImport)\s*\("
+)
 
 
 def _sources() -> dict[str, str]:

@@ -162,3 +162,11 @@ def test_network_and_refresh_failures_are_explained(monkeypatch):
     assert "通信" in tool_error("list_spaces", {})
     monkeypatch.setattr(server, "_chat", broken(RefreshError("invalid_grant")))
     assert "python -m google_chat_mcp.auth" in tool_error("list_spaces", {})
+
+
+def test_unread_only_checks_just_the_spaces_left_by_other_filters(use):
+    chat = use(make_chat())
+    data = call("list_spaces", {"unread_only": True, "name_contains": "雑談"})
+    assert data["count"] == 0
+    names = [kw["name"] for key, kw in chat.calls if key == "users.spaces.getSpaceReadState"]
+    assert not any("/spaces/A/" in n for n in names)

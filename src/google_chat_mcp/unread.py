@@ -8,41 +8,40 @@ continue from `next_since` (see messages.py).
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
+from itertools import islice
+from typing import Any
 
 from . import api
+from .concurrency import parallel_map
 from .errors import ChatMcpError
 from .messages import format_message
 from .spaces import SpaceDirectory, SpaceInfo
 from .timeutil import ago, to_epoch_us, to_jst
 
 LOOKBACK_DAYS = 90
+_NEVER_OPENED = "「{name}」は既読の記録が無いため、直近 {days}日分だけを未読として扱いました。"
 
 
-def _candidates(
-    chat, directory: SpaceDirectory, now: datetime | None
-) -> tuple[list[tuple[SpaceInfo, str | None]], list[str]]:
-    """Recent spaces with their read state, to be checked for messages after it.
+def _recent(
+    directory: SpaceDirectory, now: datetime | None, only: list[SpaceInfo] | None
+) -> tuple[list[SpaceInfo], list[str]]:
+    """Spaces whose last (human) post is within LOOKBACK_DAYS.
 
     Chat's `lastActiveTime` is not moved by app (BOT) posts, so it cannot prove that a
     space has nothing unread; it only bounds which spaces count as recent."""
     cutoff = to_epoch_us(ago(LOOKBACK_DAYS, now=now))
-    out: list[tuple[SpaceInfo, str | None]] = []
-    skipped = 0
-    for info in directory.all():
-        if not info.last_active_ts or to_epoch_us(info.last_active_ts) <= cutoff:
-            skipped += 1
-            continue
-        out.append((info, api.get_read_state(chat, info.space).get("lastReadTime")))
+    pool = directory.all() if only is None else only
+    recent = [i for i in pool if i.last_active_ts and to_epoch_us(i.last_active_ts) > cutoff]
     notes = []
-    if skipped:
+    if skipped := len(pool) - len(recent):
         notes.append(
             f"最後の（人の）発言が {LOOKBACK_DAYS}日より前（または記録なし）のスペース {skipped} 件は、"
             "未読を調べていません。ボットの投稿は「最後の発言」に数えられないため、"
             "ボットだけが投稿するスペースは space を指定して確かめてください。"
         )
-    return out, notes
+    return recent, notes
 
 
 def _unread_stream(
@@ -72,6 +71,29 @@ def _unread_stream(
         yield raw
 
 
+def _scan(
+    chat,
+    info: SpaceInfo,
+    me: str | None,
+    *,
+    include_bots: bool,
+    now: datetime | None,
+    cap: int,
+) -> tuple[str | None, list[dict]]:
+    """(lastReadTime, up to `cap` unread messages) for one space."""
+    last_read = api.get_read_state(chat, info.space).get("lastReadTime")
+    stream = _unread_stream(
+        chat,
+        info,
+        last_read,
+        me,
+        include_bots=include_bots,
+        now=now,
+        page_size=min(cap, 1000),
+    )
+    return last_read, list(islice(stream, cap))
+
+
 def _me_note(me: str | None) -> list[str]:
     if me:
         return []
@@ -79,19 +101,24 @@ def _me_note(me: str | None) -> list[str]:
 
 
 def find_unread_spaces(
-    chat, directory: SpaceDirectory, *, now: datetime | None = None
+    chat,
+    directory: SpaceDirectory,
+    *,
+    now: datetime | None = None,
+    only: list[SpaceInfo] | None = None,
+    factory: Callable[[], Any] | None = None,
 ) -> tuple[list[tuple[SpaceInfo, str | None]], list[str]]:
-    """Spaces that hold at least one unread message from someone else, with their lastReadTime."""
+    """Spaces (among `only`, default all) holding an unread message from someone else."""
     me = directory.me()
-    candidates, notes = _candidates(chat, directory, now)
+    recent, notes = _recent(directory, now, only)
+    scans = parallel_map(
+        lambda client, info: _scan(client, info, me, include_bots=True, now=now, cap=1),
+        recent,
+        chat=chat,
+        factory=factory,
+    )
     found = [
-        (info, last_read)
-        for info, last_read in candidates
-        if next(
-            _unread_stream(chat, info, last_read, me, include_bots=True, now=now, page_size=10),
-            None,
-        )
-        is not None
+        (info, last_read) for info, (last_read, msgs) in zip(recent, scans, strict=True) if msgs
     ]
     return found, notes + _me_note(me)
 
@@ -104,42 +131,43 @@ def read_unread(
     limit: int = 200,
     include_bots: bool = True,
     now: datetime | None = None,
+    factory: Callable[[], Any] | None = None,
 ) -> dict:
-    """Unread messages per space, oldest first within a space, newest spaces first."""
+    """Unread messages per space, oldest first within a space, newest spaces first.
+
+    Spaces are scanned in parallel when `factory` is given; the `limit` is then applied
+    in space order, and spaces left out by it are counted in `notes`."""
     if limit < 1:
         raise ChatMcpError("limit は 1 以上を指定してください。")
     me = directory.me()
     if space:
-        info = directory.resolve(space)
-        targets = [(info, api.get_read_state(chat, info.space).get("lastReadTime"))]
-        notes: list[str] = []
+        targets, notes = [directory.resolve(space)], []
     else:
-        targets, notes = _candidates(chat, directory, now)
+        targets, notes = _recent(directory, now, None)
+    scans = parallel_map(
+        lambda client, info: _scan(
+            client, info, me, include_bots=include_bots, now=now, cap=limit + 1
+        ),
+        targets,
+        chat=chat,
+        factory=factory,
+    )
 
     entries = []
     total = 0
     truncated = False
-    for index, (info, last_read) in enumerate(targets):
-        if total >= limit:
-            truncated = True
-            notes.append(
-                f"件数上限 {limit} に達したため、残り {len(targets) - index} スペースは調べていません。"
-                "space を指定するか limit を増やしてください。"
-            )
-            break
-        if not last_read:
-            notes.append(
-                f"「{info.display_name}」は既読の記録が無いため、直近 {LOOKBACK_DAYS}日分だけを未読として扱いました。"
-            )
-        picked: list[dict] = []
-        has_more = False
-        for raw in _unread_stream(chat, info, last_read, me, include_bots=include_bots, now=now):
-            if total + len(picked) >= limit:
-                has_more = truncated = True
-                break
-            picked.append(raw)
-        if not picked:
+    left_out = 0
+    for info, (last_read, msgs) in zip(targets, scans, strict=True):
+        if not msgs:
             continue
+        if total >= limit:
+            left_out += 1
+            continue
+        if not last_read:
+            notes.append(_NEVER_OPENED.format(name=info.display_name, days=LOOKBACK_DAYS))
+        picked = msgs[: limit - total]
+        has_more = len(msgs) > len(picked)
+        truncated = truncated or has_more
         total += len(picked)
         entries.append(
             {
@@ -152,6 +180,12 @@ def read_unread(
                 "unread_count": len(picked),
                 "has_more": has_more,
             }
+        )
+    if left_out:
+        truncated = True
+        notes.append(
+            f"件数上限 {limit} に達したため、未読のある残り {left_out} スペースは返していません。"
+            "space を指定するか limit を増やしてください。"
         )
 
     result = {"spaces": entries, "total": total, "truncated": truncated}

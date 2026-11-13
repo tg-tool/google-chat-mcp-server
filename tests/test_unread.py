@@ -182,3 +182,7 @@ def test_bot_posts_after_last_read_count_even_when_last_active_is_older():
     assert [msg_ids(s) for s in result["spaces"]] == [["m2"]]
     found, _ = find_unread_spaces(chat, SpaceDirectory(chat), now=NOW)
     assert [info.space for info, _ in found] == ["spaces/R"]
+
+
+def test_parallel_scan_gives_the_same_result():
+    assert run(factory=make_chat) == run()

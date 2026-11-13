@@ -124,7 +124,7 @@ def list_spaces(
             infos = [i for i in infos if key in norm(i.display_name)]
         notes: list[str] = []
         if unread_only:
-            found, notes = find_unread_spaces(chat, directory)
+            found, notes = find_unread_spaces(chat, directory, only=infos, factory=lambda: _chat())
             last_read = {info.space: lr for info, lr in found}
             spaces = [
                 {
@@ -278,6 +278,7 @@ def get_unread(space: str | None = None, limit: int = 200, include_bots: bool = 
             space=space,
             limit=limit,
             include_bots=include_bots,
+            factory=lambda: _chat(),
         )
 
     return _guard(run)
