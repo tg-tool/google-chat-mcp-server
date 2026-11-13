@@ -45,8 +45,9 @@ def token_path() -> Path:
     return Path(os.environ.get("GOOGLE_CHAT_MCP_TOKEN") or _DEFAULT_DIR / "token.json")
 
 
-def has_required_scopes(granted: Iterable[str] | None) -> bool:
-    return granted is not None and set(SCOPES) <= set(granted)
+def scopes_match(granted: Iterable[str] | None) -> bool:
+    """True only for exactly SCOPES: a token that can do more (e.g. write) is refused too."""
+    return granted is not None and set(granted) == set(SCOPES)
 
 
 def write_token(path: Path, data: str) -> None:
@@ -59,7 +60,7 @@ def write_token(path: Path, data: str) -> None:
 
 
 def _load_saved() -> Credentials | None:
-    """The saved token if it is usable with all SCOPES, refreshing it when expired."""
+    """The saved token if it holds exactly SCOPES, refreshing it when expired."""
     path = token_path()
     if not path.exists():
         return None
@@ -67,7 +68,7 @@ def _load_saved() -> Credentials | None:
         creds = Credentials.from_authorized_user_file(str(path))
     except (ValueError, KeyError, OSError):
         return None
-    if not has_required_scopes(creds.scopes):
+    if not scopes_match(creds.scopes):
         return None
     if creds.valid:
         return creds
@@ -81,8 +82,13 @@ def _load_saved() -> Credentials | None:
     return None
 
 
-def login(*, timeout_seconds: int = 600) -> Credentials:
-    """Run the browser login for SCOPES and save the token."""
+def login(*, timeout_seconds: int = 600, show_url: bool = False) -> Credentials:
+    """Run the browser login for SCOPES and save the token.
+
+    Inside the MCP server stdout is the protocol channel, so the library's URL prompt
+    (printed to stdout) is suppressed and a hint goes to stderr instead. The manual
+    `python -m google_chat_mcp.auth` passes show_url=True to print the URL.
+    """
     client = credentials_path()
     if not client.exists():
         raise AuthRequiredError(
@@ -91,8 +97,17 @@ def login(*, timeout_seconds: int = 600) -> Credentials:
             "環境変数 GOOGLE_CHAT_MCP_CREDENTIALS で場所を指定してください。"
         )
     flow = InstalledAppFlow.from_client_secrets_file(str(client), list(SCOPES))
+    prompt = {} if show_url else {"authorization_prompt_message": None}
+    if not show_url:
+        print(
+            "Google のログイン画面をブラウザで開きます。開かない場合は "
+            "`python -m google_chat_mcp.auth` を実行してください。",
+            file=sys.stderr,
+        )
     try:
-        creds = flow.run_local_server(port=0, timeout_seconds=timeout_seconds, open_browser=True)
+        creds = flow.run_local_server(
+            port=0, timeout_seconds=timeout_seconds, open_browser=True, **prompt
+        )
     except Exception as exc:  # the browser flow can time out or be cut short in many ways
         raise AuthRequiredError(
             f"Google へのログインが完了しませんでした（{type(exc).__name__}）。"
@@ -118,7 +133,7 @@ def load_credentials(*, interactive: bool = True, timeout_seconds: int = 300) ->
 def main() -> None:
     """`python -m google_chat_mcp.auth`: log in again by hand. Prints no secrets."""
     try:
-        creds = login()
+        creds = login(show_url=True)
     except AuthRequiredError as exc:
         print(exc, file=sys.stderr)
         raise SystemExit(1) from exc

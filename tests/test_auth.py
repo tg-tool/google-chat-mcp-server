@@ -17,6 +17,8 @@ EXPECTED = (
     "https://www.googleapis.com/auth/chat.users.readstate.readonly",
 )
 FUTURE = "2999-01-01T00:00:00Z"
+DEFAULT_PROMPT = "Please visit this URL to authorize this application: {url}"
+WRITE_SCOPE = "https://www.googleapis.com/auth/chat.messages"
 
 
 def authorized_user_json(scopes, *, expiry=FUTURE):
@@ -94,6 +96,10 @@ def logins(monkeypatch):
 
         def run_local_server(self, **kwargs):
             calls.append({"path": self.path, "scopes": self.scopes, **kwargs})
+            # like google_auth_oauthlib: the prompt goes to stdout unless it is None
+            prompt = kwargs.get("authorization_prompt_message", DEFAULT_PROMPT)
+            if prompt:
+                print(prompt.format(url="https://accounts.example/auth"))
             if FakeFlow.fail_with:
                 raise FakeFlow.fail_with
             return LoginResult(self.scopes)
@@ -119,10 +125,29 @@ def test_paths_default_and_env_override(monkeypatch, tmp_path):
     assert auth.token_path() == tmp_path / "t.json"
 
 
-def test_has_required_scopes():
-    assert auth.has_required_scopes([*EXPECTED, "openid"]) is True
-    assert auth.has_required_scopes(EXPECTED[:3]) is False
-    assert auth.has_required_scopes(None) is False
+def test_scopes_match_requires_the_exact_set():
+    assert auth.scopes_match(list(EXPECTED)) is True
+    assert auth.scopes_match(list(reversed(EXPECTED))) is True
+    assert auth.scopes_match([*EXPECTED, WRITE_SCOPE]) is False
+    assert auth.scopes_match(EXPECTED[:3]) is False
+    assert auth.scopes_match(None) is False
+
+
+def test_token_with_extra_write_scope_triggers_login(conf, logins):
+    _, tok = conf
+    tok.write_text(authorized_user_json([*EXPECTED, WRITE_SCOPE]))
+    creds = auth.load_credentials()
+    assert len(logins) == 1
+    assert set(creds.scopes) == set(EXPECTED)
+
+
+def test_in_server_login_keeps_stdout_clean(conf, logins, capsys):
+    auth.load_credentials()
+    assert len(logins) == 1
+    assert logins[0]["authorization_prompt_message"] is None
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "python -m google_chat_mcp.auth" in err
 
 
 def test_write_token_permissions(tmp_path):
@@ -221,6 +246,8 @@ def test_login_always_runs_the_browser_flow(conf, logins):
     assert logins[0]["timeout_seconds"] == 7
 
 
-def test_main_reports_ok_with_scope_count(conf, logins, capsys):
+def test_main_reports_ok_with_scope_count_and_shows_the_url(conf, logins, capsys):
     auth.main()
-    assert "認証 OK（スコープ 4/4）" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "認証 OK（スコープ 4/4）" in out
+    assert "https://accounts.example/auth" in out
