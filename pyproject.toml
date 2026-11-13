@@ -2,6 +2,7 @@
 name = "google-chat-mcp-server"
 version = "0.1.0"
 description = "Minimal read-only Google Chat MCP server for Claude Code"
+readme = "README.md"
 authors = [{ name = "tg-tool" }]
 license = "MIT"
 requires-python = ">=3.12"
