@@ -23,7 +23,10 @@ LOOKBACK_DAYS = 90
 def _candidates(
     chat, directory: SpaceDirectory, now: datetime | None
 ) -> tuple[list[tuple[SpaceInfo, str | None]], list[str]]:
-    """Spaces whose last activity is newer than the read state (recent spaces only)."""
+    """Recent spaces with their read state, to be checked for messages after it.
+
+    Chat's `lastActiveTime` is not moved by app (BOT) posts, so it cannot prove that a
+    space has nothing unread; it only bounds which spaces count as recent."""
     cutoff = to_epoch_us(ago(LOOKBACK_DAYS, now=now))
     out: list[tuple[SpaceInfo, str | None]] = []
     skipped = 0
@@ -31,15 +34,13 @@ def _candidates(
         if not info.last_active_ts or to_epoch_us(info.last_active_ts) <= cutoff:
             skipped += 1
             continue
-        last_read = api.get_read_state(chat, info.space).get("lastReadTime")
-        if last_read and to_epoch_us(info.last_active_ts) <= to_epoch_us(last_read):
-            continue
-        out.append((info, last_read))
+        out.append((info, api.get_read_state(chat, info.space).get("lastReadTime")))
     notes = []
     if skipped:
         notes.append(
-            f"最後の動きが {LOOKBACK_DAYS}日より前（または記録なし）のスペース {skipped} 件は、"
-            "未読を調べていません。"
+            f"最後の（人の）発言が {LOOKBACK_DAYS}日より前（または記録なし）のスペース {skipped} 件は、"
+            "未読を調べていません。ボットの投稿は「最後の発言」に数えられないため、"
+            "ボットだけが投稿するスペースは space を指定して確かめてください。"
         )
     return out, notes
 

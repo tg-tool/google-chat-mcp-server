@@ -80,11 +80,8 @@ def test_unread_after_last_read_excluding_own():
     assert result["truncated"] is False
 
 
-def test_space_without_new_activity_is_skipped_without_message_calls():
-    chat = make_chat()
-    run(chat)
-    parents = {kw["parent"] for key, kw in chat.calls if key == "messages.list"}
-    assert "spaces/B" not in parents
+def test_space_without_new_messages_is_not_listed():
+    assert "spaces/B" not in by_space(run())
 
 
 def test_never_opened_space_is_bounded_and_noted():
@@ -159,3 +156,29 @@ def test_find_unread_spaces_for_listing():
         ("spaces/C", None),
     ]
     assert any("1 件" in note for note in notes)
+
+
+def test_bot_posts_after_last_read_count_even_when_last_active_is_older():
+    # Chat's lastActiveTime is not moved by app (BOT) posts — measured on the real API
+    chat = FakeChat(
+        me=ME,
+        spaces=[space("R", name="日報", last_active="2026-11-13T01:00:00.000000Z")],
+        read_states={"spaces/R": "2026-11-13T01:00:00.000000Z"},
+        messages={
+            "spaces/R": [
+                message("R", 1, "2026-11-13T01:00:00.000000Z"),
+                message(
+                    "R",
+                    2,
+                    "2026-11-13T02:00:00.000000Z",
+                    sender="users/999",
+                    sender_name="日報ボット",
+                    sender_type="BOT",
+                ),
+            ]
+        },
+    )
+    result = run(chat)
+    assert [msg_ids(s) for s in result["spaces"]] == [["m2"]]
+    found, _ = find_unread_spaces(chat, SpaceDirectory(chat), now=NOW)
+    assert [info.space for info, _ in found] == ["spaces/R"]

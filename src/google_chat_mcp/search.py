@@ -46,15 +46,23 @@ def search_messages(
     since_n = to_rfc3339(since) if since else ago(DEFAULT_DAYS, now=now)
     until_n = to_rfc3339(until) if until else None
 
+    notes: list[str] = []
     if spaces:
         targets = list({info.space: info for info in map(directory.resolve, spaces)}.values())
     else:
         low = to_epoch_us(since_n)
+        everything = directory.all()
         targets = [
             info
-            for info in directory.all()
+            for info in everything
             if info.last_active_ts and to_epoch_us(info.last_active_ts) > low
         ]
+        if len(everything) > len(targets):
+            notes.append(
+                f"最後の（人の）発言が期間より前のスペース {len(everything) - len(targets)} 件は"
+                "調べていません。ボットの投稿は「最後の発言」に数えられないため、"
+                "ボットだけが投稿するスペースを探すときは spaces で指定してください。"
+            )
 
     flt = build_filter(since=since_n, until=until_n)
     found: list[tuple[int, dict]] = []
@@ -96,4 +104,6 @@ def search_messages(
     }
     if reasons:
         result["truncated_reasons"] = reasons
+    if notes:
+        result["notes"] = notes
     return result

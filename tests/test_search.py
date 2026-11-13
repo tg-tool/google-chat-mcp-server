@@ -110,3 +110,8 @@ def test_scan_cap_is_reported(monkeypatch):
 def test_empty_keywords_raise():
     with pytest.raises(ChatMcpError, match="keywords"):
         run(keywords="　 ")
+
+
+def test_spaces_skipped_by_last_activity_are_noted():
+    result = run(keywords="見積")
+    assert any("1 件" in note and "spaces" in note for note in result["notes"])
