@@ -251,3 +251,17 @@ def test_main_reports_ok_with_scope_count_and_shows_the_url(conf, logins, capsys
     out = capsys.readouterr().out
     assert "認証 OK（スコープ 4/4）" in out
     assert "https://accounts.example/auth" in out
+
+
+def test_write_token_keeps_the_old_token_when_writing_fails(tmp_path, monkeypatch):
+    p = tmp_path / "token.json"
+    auth.write_token(p, '{"old": true}')
+
+    def fail(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(auth.os, "replace", fail)
+    with pytest.raises(OSError):
+        auth.write_token(p, '{"new": true}')
+    assert p.read_text() == '{"old": true}'
+    assert [f.name for f in tmp_path.iterdir()] == ["token.json"]

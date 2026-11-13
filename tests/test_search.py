@@ -115,3 +115,24 @@ def test_empty_keywords_raise():
 def test_spaces_skipped_by_last_activity_are_noted():
     result = run(keywords="見積")
     assert any("1 件" in note and "spaces" in note for note in result["notes"])
+
+
+def test_card_placeholder_text_is_not_searched():
+    card = {"cardId": "c1", "card": {"header": {"title": "承認"}}}
+    chat = FakeChat(
+        spaces=[space("A", name="営業定例", last_active="2026-11-13T02:00:00.000000Z")],
+        messages={
+            "spaces/A": [
+                message(
+                    "A",
+                    1,
+                    "2026-11-13T01:00:00.000000Z",
+                    text=None,
+                    cardsV2=[card],
+                    sender_type="BOT",
+                ),
+                message("A", 2, "2026-11-13T01:10:00.000000Z", text="ポイントカードの件"),
+            ]
+        },
+    )
+    assert hit_ids(run(chat, keywords="カード")) == ["m2"]

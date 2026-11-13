@@ -11,6 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+import httplib2
+from google.auth.exceptions import RefreshError, TransportError
 from googleapiclient.errors import HttpError
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
@@ -71,6 +73,16 @@ def _guard(run: Callable[[], dict]) -> dict:
         raise ToolError(str(exc)) from exc
     except HttpError as exc:
         raise ToolError(explain_http_error(exc)) from exc
+    except RefreshError as exc:
+        raise ToolError(
+            "Google の認証を更新できませんでした（取り消された・期限切れの可能性）。"
+            "ターミナルで `python -m google_chat_mcp.auth` を実行してログインし直してください。"
+        ) from exc
+    except (TransportError, httplib2.HttpLib2Error, OSError) as exc:
+        raise ToolError(
+            f"Google との通信に失敗しました（{type(exc).__name__}）。"
+            "ネットワークを確かめて、少し待ってから再実行してください。"
+        ) from exc
 
 
 @server.tool()

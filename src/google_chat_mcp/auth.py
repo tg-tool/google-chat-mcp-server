@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -51,12 +52,20 @@ def scopes_match(granted: Iterable[str] | None) -> bool:
 
 
 def write_token(path: Path, data: str) -> None:
-    """Write the token readable by the owner only (file 0600, new folder 0700)."""
+    """Write the token readable by the owner only (file 0600, new folder 0700).
+
+    Written to a temporary file and swapped in with os.replace, so a failed or
+    concurrent write never leaves a half-written token behind."""
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(data)
-    os.chmod(path, 0o600)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".token-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def _load_saved() -> Credentials | None:

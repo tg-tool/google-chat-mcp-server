@@ -145,3 +145,20 @@ def test_names_are_cached_across_tool_calls(use):
     before = len(chat.calls)
     assert call("list_spaces", {}) == first
     assert [key for key, _ in chat.calls[before:]] == ["spaces.list"]
+
+
+def test_network_and_refresh_failures_are_explained(monkeypatch):
+    from google.auth.exceptions import RefreshError, TransportError
+
+    def broken(exc):
+        def _raise():
+            raise exc
+
+        return _raise
+
+    monkeypatch.setattr(server, "_chat", broken(TransportError("connection reset")))
+    assert "通信" in tool_error("list_spaces", {})
+    monkeypatch.setattr(server, "_chat", broken(TimeoutError("timed out")))
+    assert "通信" in tool_error("list_spaces", {})
+    monkeypatch.setattr(server, "_chat", broken(RefreshError("invalid_grant")))
+    assert "python -m google_chat_mcp.auth" in tool_error("list_spaces", {})

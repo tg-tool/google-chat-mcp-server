@@ -21,9 +21,12 @@ DEFAULT_DAYS = 30
 SCAN_CAP_PER_SPACE = 5000
 
 
-def _haystack(formatted: dict) -> str:
+def _haystack(raw: dict, formatted: dict) -> str:
+    """What a person wrote (text or a card's fallback) plus attachment names — never the
+    placeholder shown for text-less cards."""
+    text = raw.get("text") or raw.get("fallbackText") or ""
     names = " ".join(a["name"] for a in formatted.get("attachments", []))
-    return norm(f"{formatted['text']} {names}")
+    return norm(f"{text} {names}")
 
 
 def search_messages(
@@ -79,7 +82,7 @@ def search_messages(
                 break
             seen += 1
             formatted = format_message(raw)
-            if all(t in _haystack(formatted) for t in terms):
+            if all(t in _haystack(raw, formatted) for t in terms):
                 hit = {"space": info.space, "space_name": info.display_name, **formatted}
                 found.append((to_epoch_us(raw["createTime"]), hit))
         scanned += seen
