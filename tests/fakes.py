@@ -211,6 +211,8 @@ class _UserSpaces:
     def getSpaceReadState(self, name):  # noqa: N802 - mirrors the API's method name
         def produce():
             space_name = "spaces/" + name.split("/spaces/")[1].split("/")[0]
+            if space_name in self._c.read_state_errors:
+                raise make_http_error(403)
             resp = {"name": name.replace("users/me/", f"{self._c.me}/", 1)}
             last = self._c.read_states.get(space_name)
             if last is not None:
@@ -237,6 +239,7 @@ class FakeChat:
         read_states: dict[str, str | None] | None = None,
         me: str = "users/111",
         errors: dict[str, int] | None = None,
+        read_state_errors: set[str] | None = None,
     ):
         self.spaces_ = list(spaces)
         self.messages = messages or {}
@@ -244,6 +247,7 @@ class FakeChat:
         self.read_states = read_states or {}
         self.me = me
         self.errors = errors or {}
+        self.read_state_errors = read_state_errors or set()
         self.calls: list[tuple[str, dict]] = []
 
     def spaces(self):

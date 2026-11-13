@@ -14,6 +14,7 @@ from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
 
 from google_chat_mcp import server
 from google_chat_mcp.errors import AuthRequiredError
+from google_chat_mcp.spaces import NameCache
 from google_chat_mcp.timeutil import to_jst
 
 
@@ -43,6 +44,7 @@ def make_chat(**kwargs) -> FakeChat:
 def use(monkeypatch):
     def _use(chat):
         monkeypatch.setattr(server, "_chat", lambda: chat)
+        monkeypatch.setattr(server, "_NAMES", NameCache())
         return chat
 
     return _use
@@ -135,3 +137,11 @@ def test_get_members_and_unread_and_search_are_wired(use):
     ]
     found = call("search_messages", {"keywords": "message 2"})
     assert [h["id"] for h in found["hits"]] == ["spaces/A/messages/m2"]
+
+
+def test_names_are_cached_across_tool_calls(use):
+    chat = use(make_chat())
+    first = call("list_spaces", {})
+    before = len(chat.calls)
+    assert call("list_spaces", {}) == first
+    assert [key for key, _ in chat.calls[before:]] == ["spaces.list"]

@@ -4,7 +4,7 @@ import pytest
 from fakes import FakeChat, member, message, space
 
 from google_chat_mcp.errors import ChatMcpError
-from google_chat_mcp.spaces import SpaceDirectory, parse_space_ref
+from google_chat_mcp.spaces import NameCache, SpaceDirectory, parse_space_ref
 
 ME = "users/111"
 
@@ -160,3 +160,39 @@ def test_members_formatting():
         {"name": "佐藤", "type": "HUMAN", "role": "メンバー", "email": "sato@example.com"},
         {"name": "（名前なし）", "type": "BOT", "role": "メンバー"},
     ]
+
+
+def test_resolve_by_id_or_url_skips_the_full_listing():
+    chat = make_chat()
+    d = SpaceDirectory(chat)
+    assert d.resolve("spaces/DDDDeee456").display_name == "DM: 山田 太郎"
+    assert d.resolve("https://chat.google.com/room/AAAAbbb123?cls=7").display_name == "営業定例"
+    keys = [key for key, _ in chat.calls]
+    assert "spaces.list" not in keys
+    assert keys.count("spaces.get") == 2
+
+
+def test_shared_cache_skips_repeat_lookups():
+    chat = make_chat()
+    cache = NameCache()
+    first = names(SpaceDirectory(chat, cache=cache).all())
+    before = len(chat.calls)
+    second = names(SpaceDirectory(chat, cache=cache).all())
+    assert second == first
+    assert [key for key, _ in chat.calls[before:]] == ["spaces.list"]
+
+
+def test_cache_entries_expire():
+    now = [1000.0]
+    cache = NameCache(ttl_seconds=600, clock=lambda: now[0])
+    cache.put("name:spaces/X", "DM: 山田 太郎")
+    now[0] += 599
+    assert cache.get("name:spaces/X") == "DM: 山田 太郎"
+    now[0] += 2
+    assert cache.get("name:spaces/X") is None
+
+
+def test_me_falls_back_when_a_read_state_fails():
+    chat = make_chat()
+    chat.read_state_errors = {"spaces/AAAAbbb123"}
+    assert SpaceDirectory(chat).me() == ME

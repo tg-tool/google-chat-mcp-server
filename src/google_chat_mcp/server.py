@@ -19,7 +19,7 @@ from . import api, auth
 from .errors import ChatMcpError
 from .messages import read_messages
 from .search import search_messages as _search_messages
-from .spaces import SpaceDirectory
+from .spaces import NameCache, SpaceDirectory
 from .textutil import norm
 from .timeutil import to_epoch_us, to_jst, to_rfc3339
 from .unread import find_unread_spaces, read_unread
@@ -34,6 +34,9 @@ INSTRUCTIONS = (
 )
 
 server = MCPServer("google-chat-readonly", instructions=INSTRUCTIONS, log_level="WARNING")
+
+# Derived DM/group names and the caller's ID, shared across tool calls for a few minutes.
+_NAMES = NameCache()
 
 
 def _chat() -> Any:
@@ -96,7 +99,7 @@ def list_spaces(
                 f"space_type は {' / '.join(_SPACE_TYPES)} のどれかを指定してください（指定値: {space_type}）。"
             )
         chat = _chat()
-        directory = SpaceDirectory(chat)
+        directory = SpaceDirectory(chat, cache=_NAMES)
         infos = directory.all()
         if space_type:
             infos = [i for i in infos if i.type == space_type]
@@ -163,7 +166,7 @@ def get_messages(
 
     def run() -> dict:
         chat = _chat()
-        info = SpaceDirectory(chat).resolve(space)
+        info = SpaceDirectory(chat, cache=_NAMES).resolve(space)
         return read_messages(
             chat,
             info,
@@ -205,7 +208,7 @@ def search_messages(
         chat = _chat()
         return _search_messages(
             chat,
-            SpaceDirectory(chat),
+            SpaceDirectory(chat, cache=_NAMES),
             keywords=keywords,
             spaces=spaces,
             since=since,
@@ -226,7 +229,7 @@ def get_members(space: str) -> dict:
 
     def run() -> dict:
         chat = _chat()
-        directory = SpaceDirectory(chat)
+        directory = SpaceDirectory(chat, cache=_NAMES)
         info = directory.resolve(space)
         members = directory.members(info.space)
         return {"space": info.to_dict(), "count": len(members), "members": members}
@@ -255,7 +258,11 @@ def get_unread(space: str | None = None, limit: int = 200, include_bots: bool = 
     def run() -> dict:
         chat = _chat()
         return read_unread(
-            chat, SpaceDirectory(chat), space=space, limit=limit, include_bots=include_bots
+            chat,
+            SpaceDirectory(chat, cache=_NAMES),
+            space=space,
+            limit=limit,
+            include_bots=include_bots,
         )
 
     return _guard(run)
