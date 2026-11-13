@@ -28,7 +28,9 @@ Claude Code に Google Chat のやりとりを読ませ、把握・記録させ�
 
 ## 記録のとり方と、未読との使い分け
 
-- **記録は `next_since` で続きから読みます。** `get_messages` の返り値の `next_since` を記録に残し、次回はそれを `since` に渡すと、重複も取りこぼしもなく続きから読めます（`next_since` は API の時刻そのままで、小数秒まで落としません）。`has_more` が `true` なら、まだ続きがあります。
+- **記録は `next_since` で続きから読みます。** `get_messages` の返り値の `next_since` を記録に残し、次回はそれを `since` に渡すと、重複も取りこぼしもなく続きから読めます（`next_since` は API の時刻そのままで、小数秒まで落としません）。`since` を渡したときの `has_more` が `true` なら、まだ新しい分があります。
+- **`since` を渡さずに「最新 N 件」を読んだときは、`has_older` と `older_until` を見ます。** `has_older` が `true` なら、それより古い分があります。`older_until` を `until` に渡すと、さらに古い分を読めます。
+- 同じ時刻のメッセージは2回の読み取りに分けません（`limit` を少し超えることがあります）。
 - **未読は「まだ見ていない分の把握」に使います。** 未読は、利用者が Chat の画面で開いた時点で（スマホで開いた分も）消えます。記録の続きの起点には使いません。
 - 件数の上限で打ち切ったときは、必ず `has_more` / `truncated` / `notes` で知らせます。黙って切ることはしません。
 
@@ -87,7 +89,7 @@ claude mcp get google-chat-readonly
 - `https://www.googleapis.com/auth/chat.users.readstate.readonly`
 
 **読み取り専用は三重に担保しています。**
-1. 要求するスコープが読み取り専用だけ（テストで完全一致を確認）
+1. 要求するスコープが読み取り専用だけ（テストで完全一致を確認）。保存済みのトークンも、スコープがこの4つと完全に一致しなければ使いません
 2. Google の API に触れるのは `src/google_chat_mcp/api.py` の1か所だけで、呼ぶのは `list`・`get`・`getSpaceReadState` だけ（テストでソースを走査して確認）
 3. Google 側でも、読み取り専用のトークンでの書き込みは拒否される
 
